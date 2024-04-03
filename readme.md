@@ -1,4 +1,17 @@
 # FoundationPose: Unified 6D Pose Estimation and Tracking of Novel Objects
+
+
+# ABED
+
+1. change `/home/bowen:/home/bowen` to `/home:/home` in the `run_container.sh` file to mount your drive onto the Docker image
+
+2. to run the container:
+  a. `docker start foundationpose`
+  b. `docker exec -it foundationpose bash`
+  c. `cd home/ubuntu/Abed/FoundationPose/`
+  d. change `dataset_name` variable in `run_demo.py` accordingly.
+  e. `python run_demo.py`
+
 [[Paper]](https://arxiv.org/abs/2312.08344) [[Website]](https://nvlabs.github.io/FoundationPose/)
 
 This is an implementation of our paper published in CVPR 2024
