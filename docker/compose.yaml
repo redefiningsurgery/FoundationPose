@@ -3,7 +3,7 @@ services:
   foundationpose:
     build:
       context: ../
-      dockerfile: docker/dockerfile.dev
+      dockerfile: docker/dockerfile
     pull_policy: build
     image: foundationpose:latest      
     container_name: foundationpose
