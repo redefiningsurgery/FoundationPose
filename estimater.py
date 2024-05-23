@@ -120,7 +120,7 @@ class FoundationPose:
     # relevant_views = np.array([16, 17, 22, 23, 83, 82, 88, 89, 94, 95, 118, 119, 124, 125])
     relevant_views = np.array([17, 22, 88, 125])
     rot_grid = rot_grid[relevant_views]
-    print(f"Abed: rot grid creation time: {time.time()-t_start}")
+    logging.info(f"Abed: rot grid creation time: {time.time()-t_start}")
     logging.info(f"rot_grid:{rot_grid.shape}")
     rot_grid = mycpp.cluster_poses(30, 99999, rot_grid, self.symmetry_tfs.data.cpu().numpy())
     rot_grid = np.asarray(rot_grid)
@@ -219,13 +219,13 @@ class FoundationPose:
     xyz_map = depth2xyzmap(depth, K)
     t0 = time.time()
     poses, vis = self.refiner.predict(mesh=self.mesh, mesh_tensors=self.mesh_tensors, rgb=rgb, depth=depth, K=K, ob_in_cams=poses.data.cpu().numpy(), normal_map=normal_map, xyz_map=xyz_map, glctx=self.glctx, mesh_diameter=self.diameter, iteration=iteration, get_vis=self.debug>=2)
-    print(f"Abed: refiner time: {time.time()-t0}")
+    logging.info(f"Abed: refiner time: {time.time()-t0}")
     if vis is not None:
       imageio.imwrite(f'{self.debug_dir}/vis_refiner.png', vis)
 
     t0 = time.time()
     scores, vis = self.scorer.predict(mesh=self.mesh, rgb=rgb, depth=depth, K=K, ob_in_cams=poses.data.cpu().numpy(), normal_map=normal_map, mesh_tensors=self.mesh_tensors, glctx=self.glctx, mesh_diameter=self.diameter, get_vis=self.debug>=2)
-    print(f"Abed: scorer time: {time.time()-t0}")
+    logging.info(f"Abed: scorer time: {time.time()-t0}")
     if vis is not None:
       imageio.imwrite(f'{self.debug_dir}/vis_score.png', vis)
 
