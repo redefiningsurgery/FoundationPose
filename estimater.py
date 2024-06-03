@@ -38,6 +38,7 @@ class FoundationPose:
       self.refiner = PoseRefinePredictor()
 
     self.pose_last = None   # Used for tracking; per the centered mesh
+    self.poses = None
 
   def debug_write(self, data, filename, write_func):
     """
@@ -132,9 +133,6 @@ class FoundationPose:
         rot_grid.append(ob_in_cam)
 
     rot_grid = np.asarray(rot_grid)
-    # relevant_views = np.array([16, 17, 22, 23, 83, 82, 88, 89, 94, 95, 118, 119, 124, 125])
-    relevant_views = np.array([17, 22, 88, 125])
-    rot_grid = rot_grid[relevant_views]
     logging.info(f"Abed: rot grid creation time: {time.time()-t_start}")
     logging.info(f"rot_grid:{rot_grid.shape}")
     rot_grid = mycpp.cluster_poses(30, 99999, rot_grid, self.symmetry_tfs.data.cpu().numpy())
@@ -217,8 +215,11 @@ class FoundationPose:
     self.ob_id = ob_id
     self.ob_mask = ob_mask
 
-    poses = self.generate_random_pose_hypo(K=K, rgb=rgb, depth=depth, mask=ob_mask, scene_pts=None)
-    poses = poses.data.cpu().numpy()
+    if self.poses is None:
+      poses = self.generate_random_pose_hypo(K=K, rgb=rgb, depth=depth, mask=ob_mask, scene_pts=None)
+      poses = poses.data.cpu().numpy()
+    else:
+      poses = self.poses[:4]
     logging.info(f'poses:{poses.shape}')
     center = self.guess_translation(depth=depth, mask=ob_mask, K=K)
 
