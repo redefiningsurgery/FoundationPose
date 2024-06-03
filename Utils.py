@@ -130,7 +130,7 @@ def make_mesh_tensors(mesh, device='cuda', max_tex_size=None):
   return mesh_tensors
 
 
-def nvdiffrast_render(K=None, H=None, W=None, ob_in_cams=None, glctx=None, context='cuda', get_normal=False, mesh_tensors=None, mesh=None, projection_mat=None, bbox2d=None, output_size=None, use_light=False, light_color=None, light_dir=np.array([0,0,1]), light_pos=np.array([0,0,0]), w_ambient=0.8, w_diffuse=0.5, extra={}):
+def nvdiffrast_render(K=None, H=None, W=None, ob_in_cams=None, glctx=None, context='cuda', get_normal=False, mesh_tensors=None, mesh=None, projection_mat=None, bbox2d=None, output_size=None, use_light=False, light_color=None, light_dir=np.array([0,0,1]), light_pos=np.array([0,0,0]), w_ambient=0.8, w_diffuse=0.5, extra={}, gpu_index=0):
   '''Just plain rendering, not support any gradient
   @K: (3,3) np array
   @ob_in_cams: (N,4,4) torch tensor, openCV camera
@@ -156,10 +156,10 @@ def nvdiffrast_render(K=None, H=None, W=None, ob_in_cams=None, glctx=None, conte
   pos_idx = mesh_tensors['faces']
   has_tex = 'tex' in mesh_tensors
 
-  ob_in_glcams = torch.tensor(glcam_in_cvcam, device='cuda', dtype=torch.float)[None]@ob_in_cams
+  ob_in_glcams = torch.tensor(glcam_in_cvcam, device=f'cuda:{gpu_index}', dtype=torch.float)[None]@ob_in_cams
   if projection_mat is None:
     projection_mat = projection_matrix_from_intrinsics(K, height=H, width=W, znear=0.1, zfar=100)
-  projection_mat = torch.as_tensor(projection_mat.reshape(-1,4,4), device='cuda', dtype=torch.float)
+  projection_mat = torch.as_tensor(projection_mat.reshape(-1,4,4), device=f'cuda:{gpu_index}', dtype=torch.float)
   mtx = projection_mat@ob_in_glcams
 
   if output_size is None:
@@ -173,7 +173,7 @@ def nvdiffrast_render(K=None, H=None, W=None, ob_in_cams=None, glctx=None, conte
     t = H-bbox2d[:,1]
     r = bbox2d[:,2]
     b = H-bbox2d[:,3]
-    tf = torch.eye(4, dtype=torch.float, device='cuda').reshape(1,4,4).expand(len(ob_in_cams),4,4).contiguous()
+    tf = torch.eye(4, dtype=torch.float, device=f'cuda:{gpu_index}').reshape(1,4,4).expand(len(ob_in_cams),4,4).contiguous()
     tf[:,0,0] = W/(r-l)
     tf[:,1,1] = H/(t-b)
     tf[:,3,0] = (W-r-l)/(r-l)
@@ -200,15 +200,15 @@ def nvdiffrast_render(K=None, H=None, W=None, ob_in_cams=None, glctx=None, conte
 
   if use_light:
     if light_dir is not None:
-      light_dir_neg = -torch.as_tensor(light_dir, dtype=torch.float, device='cuda')
+      light_dir_neg = -torch.as_tensor(light_dir, dtype=torch.float, device=f'cuda:{gpu_index}')
     else:
-      light_dir_neg = torch.as_tensor(light_pos, dtype=torch.float, device='cuda').reshape(1,1,3) - pts_cam
+      light_dir_neg = torch.as_tensor(light_pos, dtype=torch.float, device=f'cuda:{gpu_index}').reshape(1,1,3) - pts_cam
     diffuse_intensity = (F.normalize(vnormals_cam, dim=-1) * F.normalize(light_dir_neg, dim=-1)).sum(dim=-1).clip(0, 1)[...,None]
     diffuse_intensity_map, _ = dr.interpolate(diffuse_intensity, rast_out, pos_idx)  # (N_pose, H, W, 1)
     if light_color is None:
       light_color = color
     else:
-      light_color = torch.as_tensor(light_color, device='cuda', dtype=torch.float)
+      light_color = torch.as_tensor(light_color, device=f'cuda:{gpu_index}', dtype=torch.float)
     color = color*w_ambient + diffuse_intensity_map*light_color*w_diffuse
 
   color = color.clip(0,1)
@@ -574,24 +574,24 @@ def compute_mesh_diameter(model_pts=None, mesh=None, n_sample=1000):
   return diameter
 
 
-def compute_crop_window_tf_batch(pts=None, H=None, W=None, poses=None, K=None, crop_ratio=1.2, out_size=None, rgb=None, uvs=None, method='min_box', mesh_diameter=None):
+def compute_crop_window_tf_batch(pts=None, H=None, W=None, poses=None, K=None, crop_ratio=1.2, out_size=None, rgb=None, uvs=None, method='min_box', mesh_diameter=None, gpu=0):
   '''Project the points and find the cropping transform
   @pts: (N,3)
   @poses: (B,4,4) tensor
   @min_box: min_box/min_circle
   @scale: scale to apply to the tightly enclosing roi
   '''
-  def compute_tf_batch(left, right, top, bottom):
+  def compute_tf_batch(left, right, top, bottom, gpu=0):
     B = len(left)
     left = left.round()
     right = right.round()
     top = top.round()
     bottom = bottom.round()
 
-    tf = torch.eye(3)[None].expand(B,-1,-1).contiguous()
+    tf = torch.eye(3)[None].expand(B,-1,-1).contiguous().to(f'cuda:{gpu}')
     tf[:,0,2] = -left
     tf[:,1,2] = -top
-    new_tf = torch.eye(3)[None].expand(B,-1,-1).contiguous()
+    new_tf = torch.eye(3)[None].expand(B,-1,-1).contiguous().to(f'cuda:{gpu}')
     new_tf[:,0,0] = out_size[0]/(right-left)
     new_tf[:,1,1] = out_size[1]/(bottom-top)
     tf = new_tf@tf
@@ -605,9 +605,9 @@ def compute_crop_window_tf_batch(pts=None, H=None, W=None, poses=None, K=None, c
                         radius,0,0,
                         -radius,0,0,
                         0,radius,0,
-                        0,-radius,0]).reshape(-1,3)
+                        0,-radius,0]).reshape(-1,3).to(f'cuda:{gpu}')
     pts = poses[:,:3,3].reshape(-1,1,3)+offsets.reshape(1,-1,3)
-    K = torch.as_tensor(K)
+    K = torch.as_tensor(K, device=f'cuda:{gpu}')
     projected = (K@pts.reshape(-1,3).T).T
     uvs = projected[:,:2]/projected[:,2:3]
     uvs = uvs.reshape(B, -1, 2)
@@ -617,13 +617,13 @@ def compute_crop_window_tf_batch(pts=None, H=None, W=None, poses=None, K=None, c
     right = center[:,0]+radius
     top = center[:,1]-radius
     bottom = center[:,1]+radius
-    tfs = compute_tf_batch(left, right, top, bottom)
+    tfs = compute_tf_batch(left, right, top, bottom, gpu=gpu)
     return tfs
 
   else:
     raise RuntimeError
 
-  return tf
+  return tf.to(torch.device(f'cuda:{gpu}'))
 
 
 
