@@ -15,7 +15,8 @@ import yaml
 import threading
 
 class FoundationPose:
-  def __init__(self, model_pts, model_normals, symmetry_tfs=None, mesh=None, scorer:ScorePredictor=None, refiner:PoseRefinePredictor=None, glctx=None, debug=0, debug_dir='/home/bowen/debug/novel_pose_debug/'):
+  def __init__(self, model_pts, model_normals, symmetry_tfs=None, mesh=None, scorer:ScorePredictor=None, refiner:PoseRefinePredictor=None, glctx=None, debug=0, debug_dir='/home/bowen/debug/novel_pose_debug/', gpu=0):
+    self.gpu = gpu
     self.gt_pose = None
     self.ignore_normal_flip = True
     self.debug = debug
@@ -30,12 +31,12 @@ class FoundationPose:
     if scorer is not None:
       self.scorer = scorer
     else:
-      self.scorer = ScorePredictor()
+      self.scorer = ScorePredictor(gpu_index = self.gpu)
 
     if refiner is not None:
       self.refiner = refiner
     else:
-      self.refiner = PoseRefinePredictor()
+      self.refiner = PoseRefinePredictor(gpu = self.gpu)
 
     self.pose_last = None   # Used for tracking; per the centered mesh
     self.poses = None
@@ -76,8 +77,8 @@ class FoundationPose:
     pcd = pcd.voxel_down_sample(self.vox_size)
     self.max_xyz = np.asarray(pcd.points).max(axis=0)
     self.min_xyz = np.asarray(pcd.points).min(axis=0)
-    self.pts = torch.tensor(np.asarray(pcd.points), dtype=torch.float32, device='cuda')
-    self.normals = F.normalize(torch.tensor(np.asarray(pcd.normals), dtype=torch.float32, device='cuda'), dim=-1)
+    self.pts = torch.tensor(np.asarray(pcd.points), dtype=torch.float32, device=f'cuda:{self.gpu}')
+    self.normals = F.normalize(torch.tensor(np.asarray(pcd.normals), dtype=torch.float32, device=f'cuda:{self.gpu}'), dim=-1)
     logging.info(f'self.pts:{self.pts.shape}')
     self.mesh_path = None
     self.mesh = mesh
@@ -89,15 +90,15 @@ class FoundationPose:
     if symmetry_tfs is None:
       self.symmetry_tfs = torch.eye(4).float().cuda()[None]
     else:
-      self.symmetry_tfs = torch.as_tensor(symmetry_tfs, device='cuda', dtype=torch.float)
+      self.symmetry_tfs = torch.as_tensor(symmetry_tfs, device=f'cuda:{self.gpu}', dtype=torch.float)
 
     logging.info("reset done")
 
 
 
   def get_tf_to_centered_mesh(self):
-    tf_to_center = torch.eye(4, dtype=torch.float, device='cuda')
-    tf_to_center[:3,3] = -torch.as_tensor(self.model_center, device='cuda', dtype=torch.float)
+    tf_to_center = torch.eye(4, dtype=torch.float, device=f'cuda:{self.gpu}')
+    tf_to_center[:3,3] = -torch.as_tensor(self.model_center, device=f'cuda:{self.gpu}', dtype=torch.float)
     return tf_to_center
 
 
@@ -138,7 +139,7 @@ class FoundationPose:
     rot_grid = mycpp.cluster_poses(30, 99999, rot_grid, self.symmetry_tfs.data.cpu().numpy())
     rot_grid = np.asarray(rot_grid)
     logging.info(f"after cluster, rot_grid:{rot_grid.shape}")
-    self.rot_grid = torch.as_tensor(rot_grid, device='cuda', dtype=torch.float)
+    self.rot_grid = torch.as_tensor(rot_grid, device=f'cuda:{self.gpu}', dtype=torch.float)
     logging.info(f"self.rot_grid: {self.rot_grid.shape}")
 
 
@@ -148,7 +149,7 @@ class FoundationPose:
     '''
     ob_in_cams = self.rot_grid.clone()
     center = self.guess_translation(depth=depth, mask=mask, K=K)
-    ob_in_cams[:,:3,3] = torch.tensor(center, device='cuda', dtype=torch.float).reshape(1,3)
+    ob_in_cams[:,:3,3] = torch.tensor(center, device=f'cuda:{self.gpu}', dtype=torch.float).reshape(1,3)
     return ob_in_cams
 
 
@@ -187,8 +188,8 @@ class FoundationPose:
       else:
         self.glctx = glctx
 
-    depth = erode_depth(depth, radius=2, device='cuda')
-    depth = bilateral_filter_depth(depth, radius=2, device='cuda')
+    depth = erode_depth(depth, radius=2, device=f'cuda:{self.gpu}')
+    depth = bilateral_filter_depth(depth, radius=2, device=f'cuda:{self.gpu}')
 
     if self.debug>=2:
       xyz_map = depth2xyzmap(depth, K)
@@ -223,8 +224,8 @@ class FoundationPose:
     logging.info(f'poses:{poses.shape}')
     center = self.guess_translation(depth=depth, mask=ob_mask, K=K)
 
-    poses = torch.as_tensor(poses, device='cuda', dtype=torch.float)
-    poses[:,:3,3] = torch.as_tensor(center.reshape(1,3), device='cuda')
+    poses = torch.as_tensor(poses, device=f'cuda:{self.gpu}', dtype=torch.float)
+    poses[:,:3,3] = torch.as_tensor(center.reshape(1,3), device=f'cuda:{self.gpu}')
 
     add_errs = self.compute_add_err_to_gt_pose(poses)
     logging.info(f"after viewpoint, add_errs min:{add_errs.min()}")
@@ -266,7 +267,7 @@ class FoundationPose:
     '''
     @poses: wrt. the centered mesh
     '''
-    return -torch.ones(len(poses), device='cuda', dtype=torch.float)
+    return -torch.ones(len(poses), device=f'cuda:{self.gpu}', dtype=torch.float)
 
 
   def track_one(self, rgb, depth, K, iteration, extra={}):
@@ -275,12 +276,12 @@ class FoundationPose:
       raise RuntimeError
     logging.info("Welcome")
 
-    depth = torch.as_tensor(depth, device='cuda', dtype=torch.float)
-    depth = erode_depth(depth, radius=2, device='cuda')
-    depth = bilateral_filter_depth(depth, radius=2, device='cuda')
+    depth = torch.as_tensor(depth, device=f'cuda:{self.gpu}', dtype=torch.float)
+    depth = erode_depth(depth, radius=2, device=f'cuda:{self.gpu}')
+    depth = bilateral_filter_depth(depth, radius=2, device=f'cuda:{self.gpu}')
     logging.info("depth processing done")
 
-    xyz_map = depth2xyzmap_batch(depth[None], torch.as_tensor(K, dtype=torch.float, device='cuda')[None], zfar=np.inf)[0]
+    xyz_map = depth2xyzmap_batch(depth[None], torch.as_tensor(K, dtype=torch.float, device=f'cuda:{self.gpu}')[None], zfar=np.inf)[0]
 
     pose, vis = self.refiner.predict(mesh=self.mesh, mesh_tensors=self.mesh_tensors, rgb=rgb, depth=depth, K=K, ob_in_cams=self.pose_last.reshape(1,4,4).data.cpu().numpy(), normal_map=None, xyz_map=xyz_map, mesh_diameter=self.diameter, glctx=self.glctx, iteration=iteration, get_vis=self.debug>=2)
     logging.info("pose done")
