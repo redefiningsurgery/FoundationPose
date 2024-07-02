@@ -39,6 +39,7 @@ class FoundationPose:
       self.refiner = PoseRefinePredictor()
 
     self.pose_last = None   # Used for tracking; per the centered mesh
+    self.abed_pose = None   # Used for continous registration
 
 
   def reset_object(self, model_pts, model_normals, symmetry_tfs=None, mesh=None):
@@ -116,6 +117,8 @@ class FoundationPose:
         rot_grid.append(ob_in_cam)
 
     rot_grid = np.asarray(rot_grid)
+    # relevant_views = np.array([16, 17, 22, 23, 82, 83, 88, 89, 94, 95, 118, 119, 124, 125])
+    # rot_grid = rot_grid[relevant_views]
     logging.info(f"rot_grid:{rot_grid.shape}")
     rot_grid = mycpp.cluster_poses(30, 99999, rot_grid, self.symmetry_tfs.data.cpu().numpy())
     rot_grid = np.asarray(rot_grid)
@@ -156,7 +159,7 @@ class FoundationPose:
     return center.reshape(3)
 
 
-  def register(self, K, rgb, depth, ob_mask, ob_id=None, glctx=None, iteration=5):
+  def register(self, K, rgb, depth, ob_mask, update_gain, ob_id=None, glctx=None, iteration=5):
     '''Copmute pose from given pts to self.pcd
     @pts: (N,3) np array, downsampled scene points
     '''
@@ -200,7 +203,10 @@ class FoundationPose:
     self.ob_id = ob_id
     self.ob_mask = ob_mask
 
-    poses = self.generate_random_pose_hypo(K=K, rgb=rgb, depth=depth, mask=ob_mask, scene_pts=None)
+    if self.abed_pose is None:
+      poses = self.generate_random_pose_hypo(K=K, rgb=rgb, depth=depth, mask=ob_mask, scene_pts=None)
+    else:
+      poses = self.abed_pose
     poses = poses.data.cpu().numpy()
     logging.info(f'poses:{poses.shape}')
     center = self.guess_translation(depth=depth, mask=ob_mask, K=K)
@@ -212,7 +218,7 @@ class FoundationPose:
     logging.info(f"after viewpoint, add_errs min:{add_errs.min()}")
 
     xyz_map = depth2xyzmap(depth, K)
-    poses, vis = self.refiner.predict(mesh=self.mesh, mesh_tensors=self.mesh_tensors, rgb=rgb, depth=depth, K=K, ob_in_cams=poses.data.cpu().numpy(), normal_map=normal_map, xyz_map=xyz_map, glctx=self.glctx, mesh_diameter=self.diameter, iteration=iteration, get_vis=self.debug>=2)
+    poses, vis = self.refiner.predict(mesh=self.mesh, mesh_tensors=self.mesh_tensors, rgb=rgb, depth=depth, K=K, update_gain=update_gain, ob_in_cams=poses.data.cpu().numpy(), normal_map=normal_map, xyz_map=xyz_map, glctx=self.glctx, mesh_diameter=self.diameter, iteration=iteration, get_vis=self.debug>=2)
     if vis is not None:
       imageio.imwrite(f'{self.debug_dir}/vis_refiner.png', vis)
 
@@ -232,7 +238,9 @@ class FoundationPose:
 
     best_pose = poses[0]@self.get_tf_to_centered_mesh()
     self.pose_last = poses[0]
+    self.abed_pose = poses[:1]
     self.best_id = ids[0]
+    print(f'aaaabed: {self.abed_pose}')
 
     self.poses = poses
     self.scores = scores
@@ -260,7 +268,7 @@ class FoundationPose:
 
     xyz_map = depth2xyzmap_batch(depth[None], torch.as_tensor(K, dtype=torch.float, device='cuda')[None], zfar=np.inf)[0]
 
-    pose, vis = self.refiner.predict(mesh=self.mesh, mesh_tensors=self.mesh_tensors, rgb=rgb, depth=depth, K=K, ob_in_cams=self.pose_last.reshape(1,4,4).data.cpu().numpy(), normal_map=None, xyz_map=xyz_map, mesh_diameter=self.diameter, glctx=self.glctx, iteration=iteration, get_vis=self.debug>=2)
+    pose, vis = self.refiner.predict(update_gain=1, mesh=self.mesh, mesh_tensors=self.mesh_tensors, rgb=rgb, depth=depth, K=K, ob_in_cams=self.pose_last.reshape(1,4,4).data.cpu().numpy(), normal_map=None, xyz_map=xyz_map, mesh_diameter=self.diameter, glctx=self.glctx, iteration=iteration, get_vis=self.debug>=2)
     logging.info("pose done")
     if self.debug>=2:
       extra['vis'] = vis

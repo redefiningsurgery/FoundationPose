@@ -156,3 +156,7 @@ data/
 logs/
 !BundleTrack/XMem/inference/data
 run_used.yml
+lsam_frames/*
+trajectory_animation.mp4
+rgb_axes_boundingbox.jpg
+cropped_color_bgr.png

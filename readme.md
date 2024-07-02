@@ -10,7 +10,7 @@
   b. `docker exec -it foundationpose bash`
   c. `cd home/ubuntu/Abed/FoundationPose/`
   d. change `dataset_name` variable in `run_demo.py` accordingly.
-  e. `python run_demo.py`
+  e. `python run_fp.py`
 
 [[Paper]](https://arxiv.org/abs/2312.08344) [[Website]](https://nvlabs.github.io/FoundationPose/)
 

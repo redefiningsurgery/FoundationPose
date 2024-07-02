@@ -147,7 +147,7 @@ class PoseRefinePredictor:
 
 
   @torch.inference_mode()
-  def predict(self, rgb, depth, K, ob_in_cams, xyz_map, normal_map=None, get_vis=False, mesh=None, mesh_tensors=None, glctx=None, mesh_diameter=None, iteration=5):
+  def predict(self, rgb, depth, K, ob_in_cams, xyz_map, update_gain, normal_map=None, get_vis=False, mesh=None, mesh_tensors=None, glctx=None, mesh_diameter=None, iteration=5):
     '''
     @rgb: np array (H,W,3)
     @ob_in_cams: np array (N,4,4)
@@ -194,7 +194,7 @@ class PoseRefinePredictor:
         logging.info("forward done")
         if self.cfg['trans_rep']=='tracknet':
           if not self.cfg['normalize_xyz']:
-            trans_delta = torch.tanh(output["trans"])*trans_normalizer
+            trans_delta = torch.tanh(output["trans"])*trans_normalizer*update_gain
           else:
             trans_delta = output["trans"]
 
@@ -218,7 +218,7 @@ class PoseRefinePredictor:
           trans_delta = output["trans"]
 
         if self.cfg['rot_rep']=='axis_angle':
-          rot_mat_delta = torch.tanh(output["rot"])*self.cfg['rot_normalizer']
+          rot_mat_delta = torch.tanh(output["rot"])*self.cfg['rot_normalizer']*update_gain
           rot_mat_delta = so3_exp_map(rot_mat_delta).permute(0,2,1)
         elif self.cfg['rot_rep']=='6d':
           rot_mat_delta = rotation_6d_to_matrix(output['rot']).permute(0,2,1)
