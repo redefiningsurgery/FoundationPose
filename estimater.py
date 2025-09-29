@@ -16,7 +16,7 @@ import yaml
 
 
 class FoundationPose:
-  def __init__(self, model_pts, model_normals, symmetry_tfs=None, mesh=None, scorer:ScorePredictor=None, refiner:PoseRefinePredictor=None, glctx=None, debug=0, debug_dir='/home/bowen/debug/novel_pose_debug/'):
+  def __init__(self, model_pts, model_normals, known_orientations=None, symmetry_tfs=None, mesh=None, scorer:ScorePredictor=None, refiner:PoseRefinePredictor=None, glctx=None, debug=0, debug_dir='/home/bowen/debug/novel_pose_debug/'):
     self.gt_pose = None
     self.ignore_normal_flip = True
     self.debug = debug
@@ -24,7 +24,10 @@ class FoundationPose:
     os.makedirs(debug_dir, exist_ok=True)
 
     self.reset_object(model_pts, model_normals, symmetry_tfs=symmetry_tfs, mesh=mesh)
-    self.make_rotation_grid(min_n_views=40, inplane_step=60)
+    if known_orientations is not None:
+      self.make_rotation_grid(known_orientations=known_orientations)
+    else:
+      self.make_rotation_grid(min_n_views=40, inplane_step=60)
 
     self.glctx = glctx
 
@@ -103,21 +106,27 @@ class FoundationPose:
 
 
 
-  def make_rotation_grid(self, min_n_views=40, inplane_step=60):
-    cam_in_obs = sample_views_icosphere(n_views=min_n_views)
-    logging.info(f'cam_in_obs:{cam_in_obs.shape}')
-    rot_grid = []
-    for i in range(len(cam_in_obs)):
-      for inplane_rot in np.deg2rad(np.arange(0, 360, inplane_step)):
-        cam_in_ob = cam_in_obs[i]
-        R_inplane = euler_matrix(0,0,inplane_rot)
-        cam_in_ob = cam_in_ob@R_inplane
-        ob_in_cam = np.linalg.inv(cam_in_ob)
-        rot_grid.append(ob_in_cam)
+  def make_rotation_grid(self, min_n_views=40, inplane_step=60, known_orientations=None):
+    if known_orientations is not None:
+        rot_grid = np.asarray(known_orientations)
+    else:
+        cam_in_obs = sample_views_icosphere(n_views=min_n_views)
+        logging.info(f'cam_in_obs:{cam_in_obs.shape}')
+        rot_grid = []
+        for i in range(len(cam_in_obs)):
+            for inplane_rot in np.deg2rad(np.arange(0, 360, inplane_step)):
+                cam_in_ob = cam_in_obs[i]
+                R_inplane = euler_matrix(0, 0, inplane_rot)
+                cam_in_ob = cam_in_ob @ R_inplane
+                ob_in_cam = np.linalg.inv(cam_in_ob)
+                rot_grid.append(ob_in_cam)
+        rot_grid = np.asarray(rot_grid)
 
-    rot_grid = np.asarray(rot_grid)
     logging.info(f"rot_grid:{rot_grid.shape}")
-    rot_grid = mycpp.cluster_poses(30, 99999, rot_grid, self.symmetry_tfs.data.cpu().numpy())
+    # The clustering step can be skipped if you provide a small number of known orientations
+    if self.symmetry_tfs is not None and known_orientations is None:
+        rot_grid = mycpp.cluster_poses(30, 99999, rot_grid, self.symmetry_tfs.data.cpu().numpy())
+    
     rot_grid = np.asarray(rot_grid)
     logging.info(f"after cluster, rot_grid:{rot_grid.shape}")
     self.rot_grid = torch.as_tensor(rot_grid, device='cuda', dtype=torch.float)
